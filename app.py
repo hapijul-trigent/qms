@@ -2,7 +2,7 @@ import streamlit as st
 from fpdf import FPDF
 from docx import Document
 import io
-from tools import load_yolo_model
+from src.tools import load_yolo_model
 from PIL import Image
 import supervision as sv
 import numpy as np
