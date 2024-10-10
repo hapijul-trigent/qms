@@ -48,7 +48,7 @@ st.markdown("""
 # Load Model
 model_side_QA = load_yolo_model('weights/model_side_view_qa.pt')
 model_top_base_qa = load_yolo_model('weights/TopBaseCheck-50.pt')
-
+model_unopened_botle_type_classification = load_yolo_model('weights/model_unopened_botle_type_classification.pt')
 
 
 from collections import defaultdict
@@ -113,7 +113,7 @@ def side_view_checks(image, view_name, model):
     
     if len(detections.xyxy) == 0:
         for thing in SIDE_CHECKS:
-            update_CHECKLIST(thing, False)
+            update_CHECKLIST(thing, False, SIDE_CHECKLIST)
     else:
         for thing in SIDE_CHECKS:
             if thing in detections.data['class_name']:
@@ -144,7 +144,21 @@ def simple_dict_to_streamlit_table(data_dict):
     """
     Converts a simple key-value dictionary into a stylish table using Streamlit.
     """
-    
+    global CHECKLIST
+    print(data_dict['Cap'].split('-', 3))
+    brand, content_type, _, cap_type = data_dict['Cap'].split('-', 3)
+    data_dict.update({
+        'Product Brand': brand,
+        'Contains': content_type,
+        'Cap Type': cap_type
+    })
+    data_dict.pop('Cap')
+    _, _, data_dict['Base'] = data_dict['Base'].split('-', 2) if 'Canprev-Type1-' not in data_dict['Base'] else (None, None, data_dict['Base'].replace('Canprev-Type1-', ''))
+    data_dict['Cap'] = 'Present' if data_dict['Cap Type'] else 'Unknown'
+    data_dict['Shoulder Type'] = data_dict['Shoulder']
+    data_dict['Shoulder'] = 'Present' if data_dict['Shoulder'] else 'Unknown'
+    data_dict = {key: data_dict[key] for key in sorted(data_dict)}
+    CHECKLIST = data_dict
     df = pd.DataFrame(list(data_dict.items()), columns=['Checks', 'Status'])
     st.dataframe(df, hide_index=True, use_container_width=True)
 
@@ -155,44 +169,50 @@ st.subheader("Upload Images")
 
 
 col1, col2 = st.columns(2)
-with col1:
-    top_view_img = st.file_uploader("Top View", type=["jpg", "png", "jpeg"])
-    if top_view_img is not None:
-        top_view_img = Image.open(top_view_img)
-        top_view_img = correct_image_orientation(top_view_img)
-with col2:
-    bottom_view_img = st.file_uploader("Bottom View", type=["jpg", "png", "jpeg"])
-    if bottom_view_img is not None:
-        bottom_view_img = Image.open(bottom_view_img)
-        bottom_view_img = correct_image_orientation(bottom_view_img)
+reset_enable = False
+# if reset_enable:
+#     if st.button('Clear'):
+#         reset_enable = False
+#         top_view_img, bottom_view_img, left_view_img, right_view_img, front_view_img, back_view_img = None, None, None, None, None, None
+if not(reset_enable):
+    with col1:
+        top_view_img = st.file_uploader("Top View", type=["jpg", "png", "jpeg"])
+        if top_view_img is not None:
+            top_view_img = Image.open(top_view_img)
+            top_view_img = correct_image_orientation(top_view_img)
+    with col2:
+        bottom_view_img = st.file_uploader("Bottom View", type=["jpg", "png", "jpeg"])
+        if bottom_view_img is not None:
+            bottom_view_img = Image.open(bottom_view_img)
+            bottom_view_img = correct_image_orientation(bottom_view_img)
 
-col3, col4 = st.columns(2)
-with col3:
-    left_view_img = st.file_uploader("Left View", type=["jpg", "png", "jpeg"])
-    if left_view_img is not None:
-        left_view_img = Image.open(left_view_img)
-        left_view_img = correct_image_orientation(left_view_img)
+    col3, col4 = st.columns(2)
+    with col3:
+        left_view_img = st.file_uploader("Left View", type=["jpg", "png", "jpeg"])
+        if left_view_img is not None:
+            left_view_img = Image.open(left_view_img)
+            left_view_img = correct_image_orientation(left_view_img)
 
-with col4:
-    right_view_img = st.file_uploader("Right View", type=["jpg", "png", "jpeg"])
-    if right_view_img is not None:
-        right_view_img = Image.open(right_view_img)
-        right_view_img = correct_image_orientation(right_view_img)
+    with col4:
+        right_view_img = st.file_uploader("Right View", type=["jpg", "png", "jpeg"])
+        if right_view_img is not None:
+            right_view_img = Image.open(right_view_img)
+            right_view_img = correct_image_orientation(right_view_img)
 
 
 
-col5, col6 = st.columns(2)
-with col5:
-    front_view_img = st.file_uploader("Front View", type=["jpg", "png", "jpeg"])
-    if front_view_img is not None:
-        front_view_img = Image.open(front_view_img)
-        front_view_img = correct_image_orientation(front_view_img)
+    col5, col6 = st.columns(2)
+    with col5:
+        front_view_img = st.file_uploader("Front View", type=["jpg", "png", "jpeg"])
+        if front_view_img is not None:
+            front_view_img = Image.open(front_view_img)
+            front_view_img = correct_image_orientation(front_view_img)
 
-with col6:
-    back_view_img = st.file_uploader("Back View", type=["jpg", "png", "jpeg"])
-    if back_view_img is not None:
-        back_view_img = Image.open(back_view_img)
-        back_view_img = correct_image_orientation(back_view_img)
+    with col6:
+        back_view_img = st.file_uploader("Back View", type=["jpg", "png", "jpeg"])
+        if back_view_img is not None:
+            back_view_img = Image.open(back_view_img)
+            back_view_img = correct_image_orientation(back_view_img)
 
 
 
@@ -223,6 +243,7 @@ def display_update_checklist(results, view_name):
         
         col = cols[idx % nocol]
         actual_class = value[0]
+        
         if view_name == 'Side':
             value = all(value)
             key = SIDE_CHECKS_MAP[key]
@@ -230,7 +251,8 @@ def display_update_checklist(results, view_name):
             #     col.checkbox(f"{key[0]}: {key[1]}", value=True, key=f"{view_name}_{key}")
             # else:
             #     col.checkbox(f"{key[0]}: {key[1]}", value=False, key=f"{view_name}_{key}")
-            CHECKLIST[key[0]] =  key[1]
+            if value:
+                CHECKLIST[key[0]] =  key[1]
         else:
             value = value[0]
             # if value:
@@ -270,9 +292,10 @@ annotation_view_panels = {
 
 
 if top_view_img and bottom_view_img and left_view_img and right_view_img and front_view_img and back_view_img:
+
     st.subheader("Unopened Bottle Checklist")
     top_check, bottom_check = st.columns(2)
-    
+
     with top_check:
         top_annotated_view = top_view_checks(top_view_img, model=model_top_base_qa)
         annotation_view_panels['Top'].image(top_annotated_view, channels='bgr')
@@ -283,10 +306,14 @@ if top_view_img and bottom_view_img and left_view_img and right_view_img and fro
         annotation_view_panels['Bottom'].image(bottom_annotated_view, channels='bgr')
         display_update_checklist(BOTTOM_CHECKLIST, "Bottom")
 
+    product_type_results = model_unopened_botle_type_classification(front_view_img)[0]
+    product_type = product_type_results.to_df().loc[0]['name'].title().split('_')[0]
+    CHECKLIST['Product Type'] = product_type
     merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels)
     display_update_checklist(SIDE_CHECKLIST, "Side")
-
+    reset_enable = True
     simple_dict_to_streamlit_table(CHECKLIST)
+
 
 
 
@@ -300,18 +327,18 @@ def generate_pdf(data_dict):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("helvetica", size=12)
 
-    pdf.set_font("Arial", 'B', size=12)
-    pdf.cell(80, 10, text="Checks", border=1)
-    pdf.cell(80, 10, text="Status", border=1)
+    pdf.set_font("helvetica", 'B', size=12)
+    pdf.cell(90, 10, text="Checks", border=1)
+    pdf.cell(90, 10, text="Status", border=1)
     pdf.ln()
 
 
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("helvetica", size=12)
     for key, value in data_dict.items():
-        pdf.cell(80, 10, text=str(key), border=1)
-        pdf.cell(80, 10, text=str(value), border=1)
+        pdf.cell(90, 10, text=str(key), border=1)
+        pdf.cell(90, 10, text=str(value), border=1)
         pdf.ln()
 
     return pdf
