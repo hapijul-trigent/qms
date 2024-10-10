@@ -49,6 +49,10 @@ st.markdown("""
 model_side_QA = load_yolo_model('weights/model_side_view_qa.pt')
 model_top_base_qa = load_yolo_model('weights/TopBaseCheck-50.pt')
 model_unopened_botle_type_classification = load_yolo_model('weights/model_unopened_botle_type_classification.pt')
+model_dropper_bottle_side_view_80 = load_yolo_model('weights/model_dropper_botle_side_view_80.pt')
+model_powder_bottle_side_view = load_yolo_model('weights/model_powder_botle_side_view.pt')
+model_liquid_bottle_side_view_80 = load_yolo_model('weights/model_liquid_botle_side_view_80.pt')
+model_side_view_pill_bottle = load_yolo_model('weights/model_side_view_pill_botle.pt')
 
 
 from collections import defaultdict
@@ -243,7 +247,7 @@ def display_update_checklist(results, view_name):
         
         col = cols[idx % nocol]
         actual_class = value[0]
-        
+
         if view_name == 'Side':
             value = all(value)
             key = SIDE_CHECKS_MAP[key]
