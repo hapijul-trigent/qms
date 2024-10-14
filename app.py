@@ -18,6 +18,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 st.image("static/CanPrev_4D-logo.jpg", width=800)
 st.markdown("""
 <style>
@@ -47,9 +48,13 @@ st.markdown("""
 
 # Load Model
 model_side_QA = load_yolo_model('weights/model_side_view_qa.pt')
-model_top_base_qa = load_yolo_model('weights/TopBaseCheck-50.pt')
+model_top_base_qa = load_yolo_model('weights/Top-Bottom-Checks-v2-40.pt')
 model_unopened_botle_type_classification = load_yolo_model('weights/model_unopened_botle_type_classification.pt')
-model_dropper_bottle_side_view_80 = load_yolo_model('weights/model_dropper_botle_side_view_80.pt')
+model_side_view_QA = {
+    'dropper_bottle' : load_yolo_model('weights/model_dropper_bottle_side_view25.pt'),
+
+}
+
 model_powder_bottle_side_view = load_yolo_model('weights/model_powder_botle_side_view.pt')
 model_liquid_bottle_side_view_80 = load_yolo_model('weights/model_liquid_botle_side_view_80.pt')
 model_side_view_pill_bottle = load_yolo_model('weights/model_side_view_pill_botle.pt')
@@ -60,6 +65,16 @@ CHECKLIST = dict()
 TOP_CHECKLIST, SIDE_CHECKLIST, BOTTOM_CHECKLIST = defaultdict(list), defaultdict(list), defaultdict(list)
 SIDE_CHECKS = {'label', 'botle_with_neckband', 'curved_shoulder'}
 SIDE_CHECKS_MAP = {'label': ('Label', 'Present'), 'botle_with_neckband': ('Neckband', 'Present'), 'curved_shoulder': ('Shoulder', 'Curved')}
+SIDE_CHECKS_MAP_NEW = {
+    'model_dropper_bottle_side_view_80': ['dropper_botle', 'dropper_botle_cap', 'dropper_botle_shoulder', 'label'],
+    'model_powder_bottle_side_view': ['label', 'powder_botle', 'powder_botle_cap'],
+    'model_liquid_bottle_side_view_80': ['Cytomatrix-Dermal-Liquid-Botle', 'Cytomatrix-Dermal-Liquid-Botle-Shoulder', 
+            'Cytomatrix-Dermal-Liquid-Botle-With-Neckband', 'Magnesium_liquid_botle', 'Magnesium_liquid_botle_cap', 
+            'Magnesium_liquid_botle_shoulder', 'label', 'Canprev-Gaba-Liquid-Botle', 
+            'Canprev-Gaba-Liquid-Botle-Cap', 'Canprev-Omega-Liquid-Botle-Cap-With-Neckband', 
+            'Canprev-Omega-Liquid-Botle', 'Canprev-Omega-Liquid-Botle-Shoulder', 'Canprev-Gaba-Liquid-Botle-shoulder'
+        ],
+}
 TOP_CHECKS = {'Cap',}
 TOP_CHECKS_MAP = {'Cap Type': 'Label Check', 'botle_with_neckband': 'Neckband Check', 'curved_shoulder': 'Shoulder Check'}
 BOTTOM_CHECKS = {'Base',}
@@ -69,6 +84,13 @@ BOTTOM_CHECKS_MAP = {'Cap Type': 'Label Check', 'botle_with_neckband': 'Neckband
 def update_CHECKLIST(key, value, CHECKLIST):
     CHECKLIST[key].append(value)
 
+
+def identify_product_type(image, model):
+    """Will check product type for Side view analysis"""
+    try:
+        pass
+    except Exception as e:
+        pass
 
 def correct_image_orientation(image):
     """Correct the orientation of an image based on its EXIF data."""
@@ -154,13 +176,14 @@ def simple_dict_to_streamlit_table(data_dict):
     data_dict.update({
         'Product Brand': brand,
         'Contains': content_type,
-        'Cap Type': cap_type
+        'Cap Type': cap_type.replace('-Cap', '').replace('Cap', 'Plastic')
     })
     data_dict.pop('Cap')
-    _, _, data_dict['Base'] = data_dict['Base'].split('-', 2) if 'Canprev-Type1-' not in data_dict['Base'] else (None, None, data_dict['Base'].replace('Canprev-Type1-', ''))
+    # _, _, data_dict['Base'] = data_dict['Base'].split('-', 2) if 'Canprev-Type1-' not in data_dict['Base'] else (None, None, data_dict['Base'].replace('Canprev-Type1-', ''))
+    data_dict['Base'] = 'Good' if data_dict['Base'] else'Unknown'
     data_dict['Cap'] = 'Present' if data_dict['Cap Type'] else 'Unknown'
     data_dict['Shoulder Type'] = data_dict['Shoulder']
-    data_dict['Shoulder'] = 'Present' if data_dict['Shoulder'] else 'Unknown'
+    data_dict['Shoulder'] = 'Good' if data_dict['Shoulder'] else 'Unknown'
     data_dict = {key: data_dict[key] for key in sorted(data_dict)}
     CHECKLIST = data_dict
     df = pd.DataFrame(list(data_dict.items()), columns=['Checks', 'Status'])
@@ -267,11 +290,11 @@ def display_update_checklist(results, view_name):
         idx += 1
 
 
-def merge_side_view_analysis(images, annotation_view_panels):
-
+def merge_side_view_analysis(images, annotation_view_panels, model=None):
+    model = model if model is not None else model_side_QA
     for view_name, image in images.items():
         if image:
-            annotated_view = side_view_checks(image, view_name, model=model_side_QA)
+            annotated_view = side_view_checks(image, view_name, model=model)
             annotation_view_panels[view_name].image(annotated_view, channels='bgr')
     return True
 
@@ -311,10 +334,14 @@ if top_view_img and bottom_view_img and left_view_img and right_view_img and fro
         display_update_checklist(BOTTOM_CHECKLIST, "Bottom")
 
     product_type_results = model_unopened_botle_type_classification(front_view_img)[0]
-    product_type = product_type_results.to_df().loc[0]['name'].title().split('_')[0]
-    CHECKLIST['Product Type'] = product_type
-    merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels)
+    product_type = product_type_results.to_df().loc[0]['name']
+    print(product_type)
+    model = model_side_view_QA.get(product_type, None)
+    CHECKLIST['Product Type'] = product_type.title().replace('_', ' ').replace('Botle', 'Bottle')
+
+    merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels, model=model)
     display_update_checklist(SIDE_CHECKLIST, "Side")
+
     reset_enable = True
     simple_dict_to_streamlit_table(CHECKLIST)
 
