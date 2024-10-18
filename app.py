@@ -5,8 +5,8 @@ import supervision as sv
 import pandas as pd
 from src.tools import load_yolo_model
 from src.report_generation import generate_pdf
-from src.checklist import update_CHECKLIST
 from src.image_processing import correct_image_orientation
+from src.utils import post_process_checks
 from dotenv import load_dotenv
 import os
 from pprint import pprint
@@ -68,26 +68,6 @@ from collections import defaultdict
 CHECKLIST = dict()
 DETECTIONS = defaultdict(tuple)
 
-TOP_CHECKLIST, SIDE_CHECKLIST, BOTTOM_CHECKLIST = defaultdict(list), defaultdict(list), defaultdict(list)
-SIDE_CHECKS = {'label', 'neckband', 'shoulder', 'bottle'}
-SIDE_CHECKS_MAP = {'label': ('Label', 'Present'), 'neckband': ('Neckband', 'Present'), 'shoulder': ('Shoulder', 'Curved'), 'bottle': ('Bottle', 'Good')}
-
-SIDE_CHECKS_MAP_NEW = {
-    'model_dropper_bottle_side_view_80': ['dropper_botle', 'dropper_botle_cap', 'dropper_botle_shoulder', 'label'],
-    'model_powder_bottle_side_view': ['label', 'powder_botle', 'powder_botle_cap'],
-    'model_liquid_bottle_side_view_80': ['Cytomatrix-Dermal-Liquid-Botle', 'Cytomatrix-Dermal-Liquid-Botle-Shoulder', 
-            'Cytomatrix-Dermal-Liquid-Botle-With-Neckband', 'Magnesium_liquid_botle', 'Magnesium_liquid_botle_cap', 
-            'Magnesium_liquid_botle_shoulder', 'label', 'Canprev-Gaba-Liquid-Botle', 
-            'Canprev-Gaba-Liquid-Botle-Cap', 'Canprev-Omega-Liquid-Botle-Cap-With-Neckband', 
-            'Canprev-Omega-Liquid-Botle', 'Canprev-Omega-Liquid-Botle-Shoulder', 'Canprev-Gaba-Liquid-Botle-shoulder'
-        ],
-}
-
-
-TOP_CHECKS = {'Cap',}
-TOP_CHECKS_MAP = {'Cap Type': 'Label Check', 'botle_with_neckband': 'Neckband Check', 'curved_shoulder': 'Shoulder Check'}
-BOTTOM_CHECKS = {'Base',}
-BOTTOM_CHECKS_MAP = {'Cap Type': 'Label Check', 'botle_with_neckband': 'Neckband Check', 'curved_shoulder': 'Shoulder Check'}
 
 
 
@@ -104,27 +84,20 @@ def identify_product_type(image, model):
 
 
 def top_view_checks(image, model):
-    
+    """Performs Top View Analysis"""
+
     result = model(image)[0]
     detections = sv.Detections.from_ultralytics(result)
     detections = detections[detections.confidence > 0.8]
 
     DETECTIONS['Top'] = {class_:confidence for class_, confidence in zip(detections.data['class_name'], detections.confidence)}
 
-    if len(detections.xyxy) == 0:
-        for thing in TOP_CHECKS:
-            update_CHECKLIST(thing, False, TOP_CHECKLIST)
-    else:
-        for thing in TOP_CHECKS:
-            update_CHECKLIST(thing, detections.data['class_name'][0], TOP_CHECKLIST)
-
-
     return result.plot()
 
 
 
 def side_view_checks(image, view_name, model):
-    """Performs Side View Checks"""
+    """Performs Side View Analysis"""
     global CHECKLIST, DETECTIONS
 
     result = model(image)[0]
@@ -133,96 +106,20 @@ def side_view_checks(image, view_name, model):
     
     DETECTIONS[view_name] = {class_:confidence for class_, confidence in zip(detections.data['class_name'], detections.confidence)}
 
-    
-    if len(detections.xyxy) == 0:
-        
-        for thing in SIDE_CHECKS:
-            update_CHECKLIST(thing, False, SIDE_CHECKLIST)
-        print(SIDE_CHECKLIST, '\\\\')
-    else:
-        for thing in SIDE_CHECKS:
-
-            if thing in detections.data['class_name']:
-                update_CHECKLIST(thing, True, SIDE_CHECKLIST)
-            else:
-                update_CHECKLIST(thing, False, SIDE_CHECKLIST)
-        
-        if view_name == 'Front' and len(detections.data['class_name'][0].split('-')) == 4:
-            try:
-                
-                for class_ in detections.data['class_name']:
-                    
-                    if ('sholder' in class_.lower() or 'shoulder' in class_.lower()):
-
-                        print(class_.lower(), '----')
-                        CHECKLIST['Shoulder'] = 'Good'
-                        CHECKLIST['Shoulder Type'] = 'Curved' if 'curved' in class_.lower() else 'Flat'
-                    
-            except ValueError as e:
-                
-                CHECKLIST['Shoulder'] = None
-                CHECKLIST['Shoulder Type'] = 'NA'
-                
-
-
     return result.plot()
 
 
 def bottom_view_checks(image, model):
-    
+    """Performs Bottom View Checks"""
+
     result = model(image)[0]
     detections = sv.Detections.from_ultralytics(result)
     detections = detections[detections.confidence > .6]
 
     DETECTIONS['Bottom'] = {class_:confidence for class_, confidence in zip(detections.data['class_name'], detections.confidence)}
 
-
-    if len(detections.xyxy) == 0:
-        for thing in BOTTOM_CHECKS:
-            update_CHECKLIST(thing, False, BOTTOM_CHECKLIST)
-    else:
-        for thing in BOTTOM_CHECKS:
-            update_CHECKLIST(thing, detections.data['class_name'][0], BOTTOM_CHECKLIST)
-
-
     return result.plot()
 
-
-
-
-def display_update_checklist(results, view_name):
-    global CHECKLIST
-    if view_name == 'Side':
-        cols = st.columns(4)
-        nocol = 4
-    else:
-        cols = st.columns(2)
-        nocol = 2
-    
-    idx = 0
-    for key, value in results.items():
-        
-        col = cols[idx % nocol]
-        actual_key = key
-
-        if view_name == 'Side':
-            print(value, '----')
-            value = all(value)
-            key = 'label' if 'label' in actual_key.lower() else (
-                    'neckband' if 'neckband' in actual_key.lower() else (
-                    'shoulder' if ('sholder' in actual_key.lower() or 'shoulder'in actual_key.lower()) else key
-                )
-            )
- 
-            key = SIDE_CHECKS_MAP[key]
-            if value:
-                if 'Curved'.casefold() in actual_key:
-                    print(actual_key, '----------')
-                CHECKLIST[key[0]] =  key[1]
-        else:
-            value = value[0]
-            CHECKLIST[key] =  value
-        idx += 1
 
 
 def merge_side_view_analysis(images, annotation_view_panels, model=None):
@@ -236,99 +133,6 @@ def merge_side_view_analysis(images, annotation_view_panels, model=None):
             
     return True
 
-
-# def simple_dict_to_streamlit_table(data_dict):
-#     """
-#     Converts a simple key-value dictionary into a stylish table using Streamlit.
-#     """
-#     global CHECKLIST
-#     print(CHECKLIST)
-    
-#     if data_dict['Cap']:
-#         brand, content_type, _, cap_type = data_dict['Cap'].split('-', 3)
-#         data_dict.update({
-#             'Product Brand': brand,
-#             'Contains': content_type,
-#             'Cap Type': cap_type.replace('-Cap', '').replace('Cap', 'Plastic')
-#         })
-#         data_dict.pop('Cap')
-#     else:
-#         data_dict.update({
-#             'Product Brand': 'Unknown',
-#             'Contains': 'Unknown',
-#             'Cap Type': 'Unknown'
-#         })
-#         data_dict.pop('Cap')
-#     # _, _, data_dict['Base'] = data_dict['Base'].split('-', 2) if 'Canprev-Type1-' not in data_dict['Base'] else (None, None, data_dict['Base'].replace('Canprev-Type1-', ''))
-#     data_dict['Base'] = 'Good' if data_dict['Base'] else'Unknown'
-#     data_dict['Cap'] = 'Present' if data_dict['Cap Type'] else 'Unknown'
-#     if data_dict.get('Shoulder', None) or data_dict.get('CurvedShoulder', None):
-#         data_dict['Shoulder Type'] = data_dict['Shoulder Type']
-#         data_dict['Shoulder'] = 'Good' if data_dict['Shoulder'] else 'Unknown'
-#     else:
-#         data_dict['Shoulder Type'] = 'NA'
-#         data_dict['Shoulder'] = 'NA'
-    
-#     if data_dict['Product Brand'].lower() == 'cytomatrix':
-#         data_dict['Cap Pattern'] = 'Hexagon'
-#     else:
-#         data_dict['Cap Pattern'] = None
-
-#     if data_dict['Product Type']== 'Dropper Bottle':
-#         data_dict['Cap Type'] = 'Dropper'
-#         data_dict['Contains'] =  'Dropper'
-
-
-#     data_dict = {key: data_dict[key] for key in sorted(data_dict)}
-#     CHECKLIST = data_dict
-#     df = pd.DataFrame(list(data_dict.items()), columns=['Checks', 'Status'])
-#     st.dataframe(df, hide_index=True, use_container_width=True)
-
-
-def simple_dict_to_streamlit_table(data_dict):
-    """
-    Converts a simple key-value dictionary into a  table using Streamlit.
-    """
-    global DETECTIONS
-
-    anomaly = False
-    
-    if DETECTIONS.get('Top', False):
-
-        label = list(DETECTIONS.get('Top').keys())[0] 
-        CHECKLIST['Cap'] = 'Good'
-        CHECKLIST['Cap Pattern'] = 'Hexagon' if 'Cytomatrix' in label else 'Plain'
-        CHECKLIST['Cap Type'] = 'Steel' if 'Steel' in label else 'Plastic' 
-    
-    else:
-
-        CHECKLIST['Cap'] = 'Unknown'
-        CHECKLIST['Cap Pattern'] = 'Unknown'
-        CHECKLIST['Cap Pattern'] = 'Unknown'
-    
-    CHECKLIST['Base'] = 'Good' if DETECTIONS.get('Bottom', False) else 'Damaged'
-
-    if (len(DETECTIONS.get('Left', [])) == 4) and (len(DETECTIONS.get('Right', [])) == 4) and (len(DETECTIONS.get('Front', [])) == 4) and (len(DETECTIONS.get('Back', [])) == 4):
-        st.success('All Good')
-        good_side_checks = set(DETECTIONS["Left"].keys()) & set(DETECTIONS["Right"].keys()) & set(DETECTIONS["Front"].keys()) & set(DETECTIONS["Back"].keys())
-        for check in {'label', 'neckband', 'shoulder', 'bottle'}:
-           
-            if check in ' '.join(good_side_checks).lower():
-                CHECKLIST[check.title()] = 'Good'
-                if check == 'shoulder':
-                    CHECKLIST['Shoulder Type'] = 'Curved' if 'curved' in ' '.join(good_side_checks).lower() else 'Flat'
-            else:
-                CHECKLIST[check.title()] = 'Unknown'
-    else:
-        st.error('Some Anomaly')
-        anomaly = True
-
-    
-    if anomaly:
-        pass
-    else:
-        df = pd.DataFrame(list(CHECKLIST.items()), columns=['Checks', 'Status'])
-        st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 
@@ -443,9 +247,9 @@ if all([top_view_img, bottom_view_img, left_view_img, right_view_img, front_view
     CHECKLIST['Product Type'] = product_type.title().replace('_', ' ').replace('Botle', 'Bottle')
 
     merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels, model=model)
-    # display_update_checklist(SIDE_CHECKLIST, "Side")
-    simple_dict_to_streamlit_table(CHECKLIST)
-    # st.json(DETECTIONS)
+    
+    DETECTIONS, CHECKLIST = post_process_checks(DETECTIONS=DETECTIONS, CHECKLIST=CHECKLIST)
+    st.json(DETECTIONS)
     st.session_state['report'] = True
 
 
