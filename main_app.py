@@ -166,6 +166,11 @@ if top_view_img and bottom_view_img and left_view_img and right_view_img and fro
     display_update_checklist(SIDE_CHECKLIST, "Side")
 
     simple_dict_to_streamlit_table(CHECKLIST)
+    reset_enable = False
+# if reset_enable:
+#     if st.button('Clear'):
+#         reset_enable = False
+#         top_view_img, bottom_view_img, left_view_img, right_view_img, front_view_img, back_view_img = None, None, None, None, None, None
 
 
 download_enabled = all([top_view_img, bottom_view_img, any(side_images.values())])
