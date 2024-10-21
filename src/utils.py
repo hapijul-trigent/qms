@@ -26,7 +26,7 @@ def post_process_checks(DETECTIONS, CHECKLIST):
 
     if (len(DETECTIONS.get('Left', [])) == 4) and (len(DETECTIONS.get('Right', [])) == 4) and (len(DETECTIONS.get('Front', [])) == 4) and (len(DETECTIONS.get('Back', [])) == 4):
         
-        # st.checkbox('QA Checks', value=True)
+        
         good_side_checks = set(DETECTIONS["Left"].keys()) & set(DETECTIONS["Right"].keys()) & set(DETECTIONS["Front"].keys()) & set(DETECTIONS["Back"].keys())
         for check in {'label', 'neckband', 'shoulder', 'bottle'}:
            
@@ -38,6 +38,9 @@ def post_process_checks(DETECTIONS, CHECKLIST):
                     CHECKLIST['Shoulder Type'] = 'Curved' if 'curved' in ' '.join(good_side_checks).lower() else 'Flat'
             else:
                 CHECKLIST[check.title()] = 'Unknown'
+    
+    elif ('Powder' in CHECKLIST['Product Type']):
+        st.info('Powder Bottle')    
     else:
         # st.checkbox('QA Checks', value=False)
         st.error('Some Anomaly')
@@ -45,7 +48,7 @@ def post_process_checks(DETECTIONS, CHECKLIST):
 
     
     if anomaly:
-        pass
+        df = pd.DataFrame(list(CHECKLIST.items()), columns=['Checks', 'Status'])
     else:
         df = pd.DataFrame(list(CHECKLIST.items()), columns=['Checks', 'Status'])
         # st.dataframe(df, hide_index=True, use_container_width=True)

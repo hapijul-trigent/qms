@@ -58,8 +58,8 @@ The provided images feature the same medical bottle captured from multiple persp
   "manufacturer address": value,
   "manufacturer phone": value,
   "manufacturer website": value,
-  "LOT number": value,
-  "expiry date (EXP)": value,
+  "LOT": value,
+  "expiry date": value,
   "additional markings": value,
   "additional information": value,
   "warnings": value
