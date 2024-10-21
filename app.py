@@ -5,9 +5,10 @@ import supervision as sv
 import pandas as pd
 from src.tools import load_yolo_model
 from src.report_generation import generate_pdf
-from src.image_processing import correct_image_orientation
-from src.utils import post_process_checks
+from src.image_processing import correct_image_orientation, convert_cropped_images_to_base64
+from src.utils import post_process_checks, process_medicinal_ingredients
 from dotenv import load_dotenv
+from src.ocr import extract_text_from_base64_images, prompt
 import os
 from pprint import pprint
 
@@ -105,8 +106,15 @@ def side_view_checks(image, view_name, model):
     detections = detections[detections.confidence > .7]
     
     DETECTIONS[view_name] = {class_:confidence for class_, confidence in zip(detections.data['class_name'], detections.confidence)}
-
-    return result.plot()
+    cropped_image = None
+    for i, (box, cls) in enumerate(zip(result.boxes.xyxy, result.boxes.cls)):
+            class_name = model.names[int(cls)]
+            if 'Label' in class_name:
+                print(class_name)
+                x1, y1, x2, y2 = map(int, box)
+                cropped_img = image.crop((x1, y1, x2, y2))
+                # st.image(cropped_img)
+    return result.plot(), cropped_img
 
 
 def bottom_view_checks(image, model):
@@ -123,15 +131,16 @@ def bottom_view_checks(image, model):
 
 
 def merge_side_view_analysis(images, annotation_view_panels, model=None):
-    global CHECKLIST
-
+    """Analyze and Aggregate all side analysis"""
+    
+    cropped_label_images = {}
     model = model if model is not None else model_side_QA
     for view_name, image in images.items():
         if image:
-            annotated_view = side_view_checks(image, view_name, model=model)
+            annotated_view, cropped_view_label = side_view_checks(image, view_name, model=model)
             annotation_view_panels[view_name].image(annotated_view, channels='bgr')
-            
-    return True
+            cropped_label_images[view_name] = cropped_view_label
+    return cropped_label_images
 
 
 
@@ -227,30 +236,59 @@ if all([top_view_img, bottom_view_img, left_view_img, right_view_img, front_view
         "Front": front_view_panel,
         "Back": back_view_panel
     }
-    st.subheader("Unopened Bottle Checklist")
+    st.subheader("QA Checks")
     top_check, bottom_check = st.columns(2)
-
-    with top_check:
-        top_annotated_view = top_view_checks(top_view_img, model=model_top_base_qa)
-        annotation_view_panels['Top'].image(top_annotated_view, channels='bgr')
+    with st.spinner(text='Analyzing Cap'):
+        with top_check:
+            try:
+                top_annotated_view = top_view_checks(top_view_img, model=model_top_base_qa)
+                annotation_view_panels['Top'].image(top_annotated_view, channels='bgr')
+                st.success('Analyzed Cap!')
+            except Exception as e:
+                st.error("Error Analyzing Cap : {e}")
         
-
-    with bottom_check:
-        bottom_annotated_view = bottom_view_checks(bottom_view_img, model=model_top_base_qa)
-        annotation_view_panels['Bottom'].image(bottom_annotated_view, channels='bgr')
-        
-
-    product_type_results = model_unopened_botle_type_classification(front_view_img)[0]
-    product_type = product_type_results.to_df().loc[0]['name']
-    print(product_type)
-    model = model_side_view_QA.get(product_type, None)
-    CHECKLIST['Product Type'] = product_type.title().replace('_', ' ').replace('Botle', 'Bottle')
-
-    merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels, model=model)
+    with st.spinner(text='Analyzing Base'):
+        with bottom_check:
+            try:
+                bottom_annotated_view = bottom_view_checks(bottom_view_img, model=model_top_base_qa)
+                annotation_view_panels['Bottom'].image(bottom_annotated_view, channels='bgr')
+                st.success('Analyzed Base!')
+            except Exception as e:
+                   st.error("Error Analyzing Base : {e}")
     
-    DETECTIONS, CHECKLIST = post_process_checks(DETECTIONS=DETECTIONS, CHECKLIST=CHECKLIST)
-    st.json(DETECTIONS)
-    st.session_state['report'] = True
+    with st.spinner(text='Checking Product Type..'):
+        product_type_results = model_unopened_botle_type_classification(front_view_img)[0]
+        product_type = product_type_results.to_df().loc[0]['name']
+        model = model_side_view_QA.get(product_type, None)
+        CHECKLIST['Product Type'] = product_type.title().replace('_', ' ').replace('Botle', 'Bottle')
+        
+    with st.spinner(text='Analyzing Side Views'):
+        cropped_label_images = merge_side_view_analysis(side_images, annotation_view_panels=annotation_view_panels, model=model)
+        DETECTIONS, CHECKLIST, proces_checks_df = post_process_checks(DETECTIONS=DETECTIONS, CHECKLIST=CHECKLIST)
+        st.success('Analyzed Side Views!')
+    
+    with st.spinner(text='Detecting Labels'):   
+        bas64_label_images = convert_cropped_images_to_base64(cropped_images=cropped_label_images)
+        st.session_state['bas64_label_images'] = bas64_label_images
+
+        with st.container():
+            checks_table, medicinal_ingredients = st.columns(2)
+            with checks_table: st.dataframe(proces_checks_df, use_container_width=True, hide_index=True, height=400)
+            with medicinal_ingredients: medicinal_ingredients_table = st.empty()
+
+    with st.spinner("Analyzing Label Information"):
+
+        df = extract_text_from_base64_images(base64_images=bas64_label_images, prompt=prompt, GPT4V_KEY=GPT4V_KEY)
+        # path = '2024-10-18T10-27_export.csv'
+        # df = pd.read_csv(path)
+        df.columns = ['Label', 'Value']
+        medicinal_df = process_medicinal_ingredients(df)
+        if all(medicinal_df):
+            df = df.loc[~(df.Label == 'medicinal ingredients')]
+        else:
+            pass
+        st.dataframe(df, hide_index=True, use_container_width=True)
+        medicinal_ingredients_table.dataframe(medicinal_df, hide_index=True, use_container_width=True, height=400)
 
 
 
@@ -262,14 +300,4 @@ if all([top_view_img, bottom_view_img, left_view_img, right_view_img, front_view
             pdf_output = io.BytesIO()
             pdf.output(pdf_output)
             pdf_output.seek(0)
-            st.download_button(label="Download PDF", data=pdf_output, file_name="QA-Checklist.pdf", mime="application/pdf")
-
-        # with docs_download_button:
-        #     if download_enabled:
-        #         doc = generate_docx(CHECKLIST)
-        #         doc_output = io.BytesIO()
-        #         doc.save(doc_output)
-        #         doc_output.seek(0)
-
-        #         st.download_button(label="Download DOCX", data=doc_output, file_name="inspection_report.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
+            st.download_button(label="Exprot Report", data=pdf_output, file_name="QA-Checklist.pdf", mime="application/pdf")

@@ -1,43 +1,98 @@
-import os
-import base64
 import requests
 import json
 import pandas as pd
-from PIL import Image, ExifTags
-from io import BytesIO
-from ultralytics import YOLO
-from datetime import datetime
+from time import sleep
+import streamlit as st
 
 
-GPT4V_ENDPOINT = "https://genai-trigent-openai.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview"
-MODEL_PATH = '/content/Model_Pill_Bottle_Nano-25.pt'
+prompt = """Task: Extract **all text and details** from medical bottle images captured from various angles (90°, 180°, 270°, 360°). The goal is to accurately identify and extract **all printed information**, including product names, ingredients, usage instructions, manufacturing details, and any other relevant text. Ensure the extracted data is combined into **one structured output**.
 
-# Function to encode PIL images to base64
-def encode_pil_images_to_base64(pil_images):
-    encoded_images = {}
-    for view, img in pil_images.items():
-        buffered = BytesIO()
-        img.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode('ascii')
-        encoded_images[view] = img_str
-    return encoded_images
+Images:
+The provided images feature the same medical bottle captured from multiple perspectives. Extract and consolidate all text across images into a **single, structured format**.
 
-# Function to send images and prompt to GPT-4V for text extraction
-def extract_text_from_images(encoded_images):
-    global GPT4V_KEY
+### Requirements:
+
+**1. Text Extraction:**
+- Capture every printed detail, including:
+  - **Product name**
+  - **Medicinal ingredients** (including herbs, chemicals, and dosage forms)
+  - **Non-medicinal ingredients**
+  - **Indications / Product description**
+  - **Directions for use**
+  - **Manufacturer details** (phone, address, website, etc.)
+  - **LOT **
+  - **Expiry date  / EXP**
+  - **Warnings / Cautions / Additional instructions**
+  - **Symbols or other markings** (e.g., regulatory labels, certifications, NPN numbers)
+  - **Address** or **contact information** printed on the bottle or packaging.
+
+- Ensure **case sensitivity** is respected (e.g., "C" vs. "c").
+- Extract all **letters, numbers, symbols, and special characters** with **accuracy**.
+- **Handle multi-line text** and **wrapped text** seamlessly.
+
+**2. Handling Complex Text:**
+- **Differentiate between sections** (e.g., "Ingredients" vs. "Directions").
+- Handle **text wrapping around curved surfaces** effectively.
+- **Preserve formatting** to distinguish between structured lists and continuous text.
+
+**3. Post-Processing:**
+- **Verify extracted text** for accuracy and completeness. Flag missing or partially illegible text.
+- If any portion of text is unclear, provide a **best-guess approximation** and **flag it for review**.
+- Use **"None"** for missing, unreadable, or absent information.
+
+### Final Output:
+
+- **Combine all information** into a **structured JSON format** with appropriate key-value pairs.
+- For each extracted field, include **all possible details**.
+- Only give JSON output not other unnecessary information
+- Example of the required JSON structure:
+```json
+{
+  "product name": value,
+  "description": value,
+  'quantity': value,
+  "medicinal ingredients": {ingredient: Quantity},
+  "nonmedicinal ingredients": value,
+  "directions": value,
+  "manufacturer name": value,
+  "manufacturer address": value,
+  "manufacturer phone": value,
+  "manufacturer website": value,
+  "LOT number": value,
+  "expiry date (EXP)": value,
+  "additional markings": value,
+  "additional information": value,
+  "warnings": value
+}```
+"""
+
+
+def extract_text_from_base64_images(
+        base64_images, 
+        prompt,
+        GPT4V_KEY,
+        GPT4V_ENDPOINT="https://genai-trigent-openai.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview"):
+    """
+    Extracts text from base64-encoded images using GPT-4V and returns a DataFrame containing the extracted information.
+    In case of a JSON decoding error, it retries up to 2 times.
+
+    Parameters:
+    - base64_images (dict): A dictionary with views (e.g., 'Front View', 'Back View') as keys and base64-encoded image data as values.
+
+    Returns:
+    - DataFrame: A Pandas DataFrame with extracted key-value pairs representing the text details from the images.
+    """
     image_urls = [
         {
             "type": "image_url",
             "image_url": {
                 "view": view,
-                "url": f"data:image/jpeg;base64,{encoded_image}"
+                "url": f"data:image/jpeg;base64,{base64_img}"
             }
         }
-        for view, encoded_image in encoded_images.items()
+        for view, base64_img in base64_images.items()
     ]
-
-    # GPT-4V prompt
-    prompt = """Your extraction task details..."""
+    
 
     payload = {
         "messages": [
@@ -50,9 +105,9 @@ def extract_text_from_images(encoded_images):
                 "content": image_urls
             }
         ],
-        "temperature": 0.7,
+        "temperature": 0.3,
         "top_p": 0.95,
-        "max_tokens": 2000
+        "max_tokens": 3000
     }
 
     headers = {
@@ -60,58 +115,21 @@ def extract_text_from_images(encoded_images):
         "api-key": GPT4V_KEY,
     }
 
-    start = datetime.now()
-    try:
-        response = requests.post(GPT4V_ENDPOINT, headers=headers, json=payload)
-        response.raise_for_status()
-        end = datetime.now()
-        print('Time: ', end - start)
-        return response.json()['choices'][0]['message']['content']
-    except requests.RequestException as e:
-        raise SystemExit(f"Failed to make the request. Error: {e}")
-
-# Function to convert JSON string to DataFrame
-def json_to_dataframe(json_content):
-    json_data = json.loads(json_content.replace("```json", '').replace("```", ''))
-    df = pd.DataFrame(list(json_data.items()), columns=['Key', 'Value'])
-    return df
-
-# Function to process PIL images with YOLO model and return cropped images
-def process_pil_images_with_yolo(model_path, pil_images):
-    model = YOLO(model_path)
-    cropped_images = {}
-    
-    for view, img in pil_images.items():
-        # Save image to buffer to use with YOLO model
-        buffered = BytesIO()
-        img.save(buffered, format="JPEG")
-        buffered.seek(0)
-
-        # Perform prediction
-        result = model(buffered)[0]
-        img = correct_image_orientation(img)
-
-        # Loop through each detected object in the image
-        for i, (box, cls) in enumerate(zip(result.boxes.xyxy, result.boxes.cls)):
-            class_name = model.names[int(cls)]
-            if class_name == 'Cytomatrix--PillBottle-Label':  # Replace with your relevant class
-                x1, y1, x2, y2 = map(int, box)
-                cropped_img = img.crop((x1, y1, x2, y2))
-                cropped_images[view] = cropped_img  # Save cropped images for further processing
-    return cropped_images
-
-# Main function to handle PIL images input, processing, and text extraction
-def extract_text_from_pil_images_streamlit(pil_images, model_path=MODEL_PATH):
-    # Process images with YOLO and get cropped images
-    cropped_images = process_pil_images_with_yolo(model_path, pil_images)
-    
-    # Encode images to base64
-    encoded_images = encode_pil_images_to_base64(cropped_images)
-    
-    # Extract text from images using GPT-4V
-    json_content = extract_text_from_images(encoded_images)
-    
-    # Convert JSON content to a DataFrame
-    df = json_to_dataframe(json_content)
-    
-    return df
+    retries = 2
+    for attempt in range(retries + 1):
+        try:
+            response = requests.post(GPT4V_ENDPOINT, headers=headers, json=payload)
+            response.raise_for_status()
+            json_content = response.json()['choices'][0]['message']['content']
+            json_data = json.loads(json_content.replace("```json", '').replace("```", ''))
+            # st.json(json_data)
+            df = pd.DataFrame(list(json_data.items()), columns=['Key', 'Value'])
+            return df
+        except (json.JSONDecodeError, KeyError) as e:
+            if attempt < retries:
+                sleep(3)  # Delay between retries
+                print(f"Retry {attempt + 1}/{retries} after JSONDecodeError: {e}")
+            else:
+                raise SystemExit(f"Failed to decode the JSON response after {retries} attempts. Error: {e}")
+        except requests.RequestException as e:
+            raise SystemExit(f"Failed to make the request. Error: {e}")
