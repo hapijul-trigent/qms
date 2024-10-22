@@ -15,7 +15,7 @@ The provided images feature the same medical bottle captured from multiple persp
 **1. Text Extraction:**
 - Capture every printed detail, including:
   - **Product name**
-  - **Medicinal ingredients** (including herbs, chemicals, and dosage forms)
+  - **Medicinal ingredients** (including herbs, chemicals, and dosage forms). If you don't see quantity given menion not specified
   - **Non-medicinal ingredients**
   - **Indications / Product description**
   - **Directions for use**
@@ -107,7 +107,7 @@ def extract_text_from_base64_images(
         ],
         "temperature": 0.3,
         "top_p": 0.95,
-        "max_tokens": 3000
+        "max_tokens": 2500
     }
 
     headers = {

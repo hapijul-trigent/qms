@@ -168,3 +168,4 @@ websocket-client==1.8.0
 fpdf2
 python-docx
 python-dotenv
+reportlab
