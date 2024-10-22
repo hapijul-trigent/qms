@@ -1,8 +1,7 @@
-import numpy as np
-import cv2
-from PIL import Image, ExifTags
-import supervision as sv
-from src.checklist import update_CHECKLIST, TOP_CHECKLIST, SIDE_CHECKLIST, BOTTOM_CHECKLIST
+from PIL import ExifTags
+import base64
+from io import BytesIO
+from PIL import Image
 
 def correct_image_orientation(image):
     """Correct the orientation of an image based on its EXIF data."""
@@ -24,57 +23,19 @@ def correct_image_orientation(image):
         pass
     return image
 
-def top_view_checks(image, model):
-    """Perform checks for the top view."""
-    result = model(image)[0]
-    detections = sv.Detections.from_ultralytics(result)
-    detections = detections[detections.confidence > .6]
 
-    if len(detections.xyxy) == 0:
-        for thing in TOP_CHECKLIST:
-            update_CHECKLIST(thing, False, TOP_CHECKLIST)
-    else:
-        for thing in TOP_CHECKLIST:
-            update_CHECKLIST(thing, detections.data['class_name'][0], TOP_CHECKLIST)
 
-    return result.plot()
 
-def side_view_checks(image, view_name, model):
-    """Perform checks for the side view."""
-    result = model(image)[0]
-    detections = sv.Detections.from_ultralytics(result)
-    detections = detections[detections.confidence > .6]
 
-    if len(detections.xyxy) == 0:
-        for thing in SIDE_CHECKLIST:
-            update_CHECKLIST(thing, False, SIDE_CHECKLIST)
-    else:
-        for thing in SIDE_CHECKLIST:
-            if thing in detections.data['class_name']:
-                update_CHECKLIST(thing, True, SIDE_CHECKLIST)
-            else:
-                update_CHECKLIST(thing, False, SIDE_CHECKLIST)
-
-    return result.plot()
-
-def bottom_view_checks(image, model):
-    """Perform checks for the bottom view."""
-    result = model(image)[0]
-    detections = sv.Detections.from_ultralytics(result)
-    detections = detections[detections.confidence > .6]
-
-    if len(detections.xyxy) == 0:
-        for thing in BOTTOM_CHECKLIST:
-            update_CHECKLIST(thing, False, BOTTOM_CHECKLIST)
-    else:
-        for thing in BOTTOM_CHECKLIST:
-            update_CHECKLIST(thing, detections.data['class_name'][0], BOTTOM_CHECKLIST)
-
-    return result.plot()
-
-def merge_side_view_analysis(images, annotation_view_panels):
-    for view_name, image in images.items():
-        if image:
-            annotated_view = side_view_checks(image, view_name, model=model_side_QA)
-            annotation_view_panels[view_name].image(annotated_view, channels='bgr')
-    return True
+def convert_cropped_images_to_base64(cropped_images):
+    """Function to convert cropped PIL images into base64-encoded strings"""
+    base64_images = {}
+    
+    for view, img in cropped_images.items():
+        
+        buffered = BytesIO()
+        img.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode('ascii')
+        base64_images[view] = img_str
+    
+    return base64_images
